@@ -1,27 +1,24 @@
 #include <coreinit/thread.h>
 #include <coreinit/time.h>
+#include <whb/gfx.h>
 #include <whb/log.h>
-#include <whb/log_console.h>
 #include <whb/proc.h>
 
 int main(int argc, char **argv)
 {
-WHBProcInit();
-WHBLogConsoleInit();
+    WHBProcInit();
+    WHBGfxInit();
 
+    while (WHBProcIsRunning())
+    {
+        WHBGfxBeginRender();
+        WHBGfxClearColor(0.92f, 0.92f, 0.92f, 1.0f);
+        WHBGfxFinishRender();
 
-WHBLogPrintf("UiiverseTest started!");
+        OSSleepTicks(OSMillisecondsToTicks(16));
+    }
 
-while (WHBProcIsRunning())
-{
-    WHBLogConsoleDraw();
-    OSSleepTicks(OSMillisecondsToTicks(100));
-}
-
-WHBLogConsoleFree();
-WHBProcShutdown();
-
-return 0;
-
-
+    WHBGfxShutdown();
+    WHBProcShutdown();
+    return 0;
 }
