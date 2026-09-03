@@ -140,10 +140,13 @@ int main(){
  uint32_t shaderSize=0;char *shaderData=WHBReadWholeFile(SHADER,&shaderSize);WHBGfxShaderGroup sh;memset(&sh,0,sizeof(sh));
  bool shader=shaderData&&WHBGfxLoadGFDShaderGroup(&sh,0,shaderData);
  if(shader){WHBGfxInitShaderAttribute(&sh,"position",0,0,GX2_ATTRIB_FORMAT_FLOAT_32_32);WHBGfxInitShaderAttribute(&sh,"tex_coord_in",1,0,GX2_ATTRIB_FORMAT_FLOAT_32_32);WHBGfxInitFetchShader(&sh);}
- GX2RBuffer pb={0},ub={0};
+ GX2RBuffer pb{},ub{};
  pb.flags=GX2R_RESOURCE_BIND_VERTEX_BUFFER|GX2R_RESOURCE_USAGE_CPU_READ|GX2R_RESOURCE_USAGE_CPU_WRITE|GX2R_RESOURCE_USAGE_GPU_READ;pb.elemSize=sizeof(V);pb.elemCount=4;GX2RCreateBuffer(&pb);
  ub.flags=GX2R_RESOURCE_BIND_VERTEX_BUFFER|GX2R_RESOURCE_USAGE_CPU_READ|GX2R_RESOURCE_USAGE_CPU_WRITE|GX2R_RESOURCE_USAGE_GPU_READ;ub.elemSize=sizeof(UV);ub.elemCount=4;GX2RCreateBuffer(&ub);
- Tex pen,eraser,write;loadBflim(pen,ROOT "P_PenIcon_00^t.bflim");loadBflim(eraser,ROOT "P_EraserIcon_00^t.bflim");loadBflim(write,ROOT "P_WriteIcon_00^t.bflim");
+ Tex pen,eraser,write;
+ loadBflim(pen,"/vol/content/memo/layout/Body/Common-extracted/timg/P_PenIcon_00^t.bflim");
+ loadBflim(eraser,"/vol/content/memo/layout/Body/Common-extracted/timg/P_EraserIcon_00^t.bflim");
+ loadBflim(write,"/vol/content/memo/layout/Body/Common-extracted/timg/P_WriteIcon_00^t.bflim");
  WHBLogPrintf("Textures: pen=%d eraser=%d write=%d shader=%d",pen.ok,eraser.ok,write.ok,shader);
  GX2Sampler samp;GX2InitSampler(&samp,GX2_TEX_CLAMP_MODE_CLAMP,GX2_TEX_XY_FILTER_MODE_LINEAR);
  while(WHBProcIsRunning()){
@@ -151,7 +154,7 @@ int main(){
   if(VPADRead(VPAD_CHAN_0,&st,1,&er)>0){
    if(st.trigger&VPAD_BUTTON_A)WHBLogPrintf("A: UI selection");
    if(st.trigger&VPAD_BUTTON_B)WHBLogPrintf("B: UI back");
-   if(st.tpNormal.touched&&st.tpNormal.validity==VPAD_VALID)WHBLogPrintf("Touch %.0f %.0f",st.tpNormal.x,st.tpNormal.y);
+   if(st.tpNormal.touched&&st.tpNormal.validity==VPAD_VALID)WHBLogPrintf("Touch %d %d",st.tpNormal.x,st.tpNormal.y);
   }
   WHBGfxBeginRender();
   WHBGfxBeginRenderTV();WHBGfxClearColor(0.92f,0.92f,0.92f,1.0f);
