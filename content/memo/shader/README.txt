@@ -1,0 +1,1 @@
+Stage 2 uses texture_shader.gsh for the original BFLIM texture renderer.
