@@ -1,4 +1,3 @@
-
 TARGET := UiiverseTest
 BUILD := build
 
@@ -12,6 +11,11 @@ RPXSPECS := -specs=C:/devkitPro/wut/share/wut.specs
 
 WUHBT := C:/devkitPro/tools/bin/wuhbtool
 ELF2RPL := C:/devkitPro/tools/bin/elf2rpl.exe
+
+# Embed the original Miiverse memo UI files in the WUHB content bundle.
+APP_CONTENT := content
+APP_NAME := Uiiverse
+APP_SHORTNAME := Uiiverse
 
 all: $(TARGET).wuhb
 
@@ -30,7 +34,7 @@ $(TARGET).rpx: $(TARGET).elf
 	@echo built ... $(TARGET).rpx
 
 $(TARGET).wuhb: $(TARGET).rpx
-	$(WUHBT) $< $@ --name="UiiverseTest" --short-name="UiiverseTest"
+	$(WUHBT) $< $@ --content=$(APP_CONTENT) --name="$(APP_NAME)" --short-name="$(APP_SHORTNAME)"
 	@echo built ... $(TARGET).wuhb
 
 clean:
