@@ -1,4 +1,5 @@
 #include <coreinit/memdefaultheap.h>
+#include <coreinit/thread.h>
 #include <coreinit/time.h>
 #include <gx2/draw.h>
 #include <gx2/mem.h>
