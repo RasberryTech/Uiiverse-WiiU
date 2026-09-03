@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+
+<app version="1">
+    <name>UiiverseTest</name>
+    <coder>RasberryTech</coder>
+    <version>1.0</version>
+    <short_description>Uiiverse Wii U Test</short_description>
+    <long_description>First Uiiverse Wii U launch test.</long_description>
+    <release_date>20260830</release_date>
+    <category>homebrew</category>
+</app>
