@@ -1,159 +1,32 @@
-#include <coreinit/thread.h>
-#include <coreinit/time.h>
 #include <coreinit/memdefaultheap.h>
+#include <coreinit/time.h>
+#include <gx2/draw.h>
+#include <gx2/mem.h>
+#include <gx2/texture.h>
+#include <gx2r/buffer.h>
+#include <vpad/input.h>
 #include <whb/file.h>
 #include <whb/gfx.h>
 #include <whb/log.h>
 #include <whb/proc.h>
-#include <vpad/input.h>
-
 #include <stdint.h>
 #include <string.h>
 
-// Stage 2: load the original MemoTop layout from the WUHB content bundle,
-// read its pane names, and provide GamePad touch/button interaction.
-// The BFLYT/BFLIM data remains untouched in content/memo.
-
-static const char *kMemoLayout =
-    "/vol/content/memo/layout/Body/Common-extracted/blyt/MemoTop.bflyt";
-
-struct Stage2State {
-    bool running;
-    bool pressed;
-    uint32_t selected;
-    float touchX;
-    float touchY;
-};
-
-static bool hasName(const uint8_t *data, uint32_t size, const char *name)
-{
-    const size_t n = strlen(name);
-    if (n == 0 || size < n)
-        return false;
-
-    for (uint32_t i = 0; i + n <= size; ++i) {
-        if (memcmp(data + i, name, n) == 0)
-            return true;
-    }
-    return false;
-}
-
-static void scanMemoLayout()
-{
-    uint32_t size = 0;
-    void *raw = WHBReadWholeFile(kMemoLayout, &size);
-    if (!raw) {
-        WHBLogPrintf("Stage2: could not load %s", kMemoLayout);
-        return;
-    }
-
-    const uint8_t *data = static_cast<const uint8_t *>(raw);
-    const bool valid = size >= 4 && memcmp(data, "FLYT", 4) == 0;
-
-    WHBLogPrintf("Stage2: MemoTop %s (%u bytes)", valid ? "loaded" : "invalid", size);
-    WHBLogPrintf("Stage2: BtnPen=%s BtnErs=%s BtnUndo=%s BtnWrite=%s",
-                 hasName(data, size, "BtnPen") ? "yes" : "no",
-                 hasName(data, size, "BtnErs") ? "yes" : "no",
-                 hasName(data, size, "BtnUndo") ? "yes" : "no",
-                 hasName(data, size, "BtnWriteIcon") ? "yes" : "no");
-
-    WHBFreeWholeFile(raw);
-}
-
-static void readGamePad(Stage2State &state)
-{
-    VPADStatus status;
-    VPADReadError error;
-    memset(&status, 0, sizeof(status));
-
-    if (VPADRead(VPAD_CHAN_0, &status, 1, &error) <= 0)
-        return;
-
-    state.pressed = false;
-
-    if (status.trigger & VPAD_BUTTON_A) {
-        state.selected = (state.selected + 1) & 3;
-        state.pressed = true;
-    }
-
-    if (status.trigger & VPAD_BUTTON_B) {
-        state.selected = 3;
-        state.pressed = true;
-    }
-
-    if (status.touch.touched && status.touch.validity == VPAD_TOUCH_VALID) {
-        state.touchX = static_cast<float>(status.touch.x);
-        state.touchY = static_cast<float>(status.touch.y);
-
-        // MemoTop's four primary controls occupy the right-hand toolbar.
-        // Touching the corresponding horizontal bands selects a control.
-        if (state.touchX >= 650.0f && state.touchX <= 854.0f) {
-            if (state.touchY < 120.0f)
-                state.selected = 0; // Pen
-            else if (state.touchY < 240.0f)
-                state.selected = 1; // Eraser
-            else if (state.touchY < 360.0f)
-                state.selected = 2; // Write
-            else
-                state.selected = 3; // Undo
-            state.pressed = true;
-        }
-    }
-}
-
-int main(int argc, char **argv)
-{
-    (void)argc;
-    (void)argv;
-
-    WHBProcInit();
-    WHBGfxInit();
-    WHBLogConsoleInit();
-
-    Stage2State state = {true, false, 0, 0.0f, 0.0f};
-    scanMemoLayout();
-
-    WHBLogPrintf("Stage 2 interactive UI started");
-    WHBLogPrintf("A = next control, B = Undo, touch = select toolbar");
-
-    while (WHBProcIsRunning() && state.running)
-    {
-        readGamePad(state);
-
-        WHBGfxBeginRender();
-
-        // Keep the Wii U render path active while Stage 2 assets are loaded.
-        // The selected control gets a visible color state so interaction can
-        // be verified on real hardware before the BFLIM/GX2 material renderer
-        // is enabled.
-        switch (state.selected) {
-            case 0:
-                WHBGfxClearColor(0.88f, 0.93f, 1.0f, 1.0f);
-                break;
-            case 1:
-                WHBGfxClearColor(0.93f, 0.88f, 1.0f, 1.0f);
-                break;
-            case 2:
-                WHBGfxClearColor(0.88f, 1.0f, 0.92f, 1.0f);
-                break;
-            default:
-                WHBGfxClearColor(1.0f, 0.93f, 0.88f, 1.0f);
-                break;
-        }
-
-        WHBGfxFinishRender();
-        WHBLogConsoleDraw();
-
-        if (state.pressed) {
-            WHBLogPrintf("Stage2: selected control %u (touch %.0f, %.0f)",
-                         state.selected, state.touchX, state.touchY);
-        }
-
-        OSSleepTicks(OSMillisecondsToTicks(16));
-    }
-
-    WHBLogConsoleFree();
-    WHBGfxShutdown();
-    WHBProcShutdown();
-    return 0;
-}
+static const char *LAYOUT="/vol/content/memo/layout/Body/Common-extracted/blyt/MemoTop.bflyt";
+static const char *SHADER="/vol/content/memo/shader/texture_shader.gsh";
+struct Pane{char name[25];float x,y,w,h;uint8_t visible;};
+struct Tex{GX2Texture t;void *file,*image;bool ok;};
+struct V{float x,y,u,v;};
+static uint16_t u16(const uint8_t*p){return (p[0]<<8)|p[1];}
+static uint32_t u32(const uint8_t*p){return (uint32_t(p[0])<<24)|(uint32_t(p[1])<<16)|(uint32_t(p[2])<<8)|p[3];}
+static float f32(const uint8_t*p){uint32_t n=u32(p);float f;memcpy(&f,&n,4);return f;}
+static bool has(const char*a,const char*b){return strstr(a,b)!=0;}
+static void name(char*d,const uint8_t*s){size_t i=0;for(;i<24&&s[i];i++)d[i]=char(s[i]);d[i]=0;}
+static GX2SurfaceFormat fmt(uint8_t f){switch(f){case 0x00:return GX2_SURFACE_FORMAT_UNORM_R8;case 0x02:return GX2_SURFACE_FORMAT_UNORM_R4_G4;case 0x03:return GX2_SURFACE_FORMAT_UNORM_R8_G8;case 0x05:return GX2_SURFACE_FORMAT_UNORM_R5_G6_B5;case 0x07:return GX2_SURFACE_FORMAT_UNORM_R5_G5_B5_A1;case 0x08:return GX2_SURFACE_FORMAT_UNORM_R4_G4_B4_A4;case 0x09:return GX2_SURFACE_FORMAT_UNORM_R8_G8_B8_A8;case 0x0c:return GX2_SURFACE_FORMAT_UNORM_BC1;case 0x0d:return GX2_SURFACE_FORMAT_UNORM_BC2;case 0x0e:return GX2_SURFACE_FORMAT_UNORM_BC3;case 0x0f:case 0x10:return GX2_SURFACE_FORMAT_UNORM_BC4;case 0x11:return GX2_SURFACE_FORMAT_UNORM_BC5;case 0x14:return GX2_SURFACE_FORMAT_SRGB_R8_G8_B8_A8;case 0x15:return GX2_SURFACE_FORMAT_SRGB_BC1;case 0x16:return GX2_SURFACE_FORMAT_SRGB_BC2;case 0x17:return GX2_SURFACE_FORMAT_SRGB_BC3;case 0x18:return GX2_SURFACE_FORMAT_UNORM_R10_G10_B10_A2;default:return GX2_SURFACE_FORMAT_INVALID;}}
+static bool loadTex(Tex&o,const char*p){memset(&o,0,sizeof(o));uint32_t sz=0;void*r=WHBReadWholeFile(p,&sz);if(!r||sz<0x28)return false;uint8_t*d=(uint8_t*)r;uint32_t foot=sz-0x28;uint8_t*fl=d+foot,*im=fl+0x14;if(memcmp(fl,"FLIM",4)||memcmp(im,"imag",4)){WHBFreeWholeFile(r);return false;}uint16_t w=u16(im+8),h=u16(im+10);uint8_t packed=im[0x0f];uint32_t rawsz=u32(im+0x10);GX2SurfaceFormat sf=fmt(im[0x0e]);if(!w||!h||sf==GX2_SURFACE_FORMAT_INVALID){WHBFreeWholeFile(r);return false;}memset(&o.t,0,sizeof(o.t));o.t.surface.dim=GX2_SURFACE_DIM_TEXTURE_2D;o.t.surface.width=w;o.t.surface.height=h;o.t.surface.depth=1;o.t.surface.mipLevels=1;o.t.surface.format=sf;o.t.surface.aa=GX2_AA_MODE1X;o.t.surface.use=GX2_SURFACE_USE_TEXTURE;o.t.surface.tileMode=GX2TileMode(packed&31);o.t.surface.swizzle=packed>>5;GX2CalcSurfaceSizeAndAlignment(&o.t.surface);o.image=MEMAllocFromDefaultHeapEx(o.t.surface.imageSize,o.t.surface.alignment);if(!o.image){WHBFreeWholeFile(r);return false;}memset(o.image,0,o.t.surface.imageSize);uint32_t n=rawsz<o.t.surface.imageSize?rawsz:o.t.surface.imageSize;memcpy(o.image,d,n);o.t.surface.image=o.image;o.t.viewFirstMip=0;o.t.viewNumMips=1;o.t.viewFirstSlice=0;o.t.viewNumSlices=1;o.t.compMap=0x00010203;GX2InitTextureRegs(&o.t);GX2Invalidate(GX2_INVALIDATE_MODE_CPU_TEXTURE,o.image,o.t.surface.imageSize);o.file=r;o.ok=true;WHBLogPrintf("BFLIM %s %ux%u fmt %u tile %u",p,w,h,im[0x0e],packed&31);return true;}
+static void freeTex(Tex&o){if(o.image)MEMFreeToDefaultHeap(o.image);if(o.file)WHBFreeWholeFile(o.file);memset(&o,0,sizeof(o));}
+static uint32_t parse(Pane*p,uint32_t max,float&lw,float&lh){lw=854;lh=480;uint32_t sz=0;void*r=WHBReadWholeFile(LAYOUT,&sz);if(!r)return 0;uint8_t*d=(uint8_t*)r;if(memcmp(d,"FLYT",4)){WHBFreeWholeFile(r);return 0;}uint32_t n=0;for(uint32_t o=0x14;o+8<=sz;){uint8_t*s=d+o;uint32_t ss=u32(s+4);if(ss<8||o+ss>sz)break;if(!memcmp(s,"lyt1",4)&&ss>=0x1c){lw=f32(s+0x0c);lh=f32(s+0x10);}if(!memcmp(s,"pic1",4)&&ss>=0x68&&n<max){Pane&q=p[n++];memset(&q,0,sizeof(q));name(q.name,s+0x14);q.visible=s[8]&1;q.x=f32(s+0x30);q.y=f32(s+0x34);q.w=f32(s+0x50);q.h=f32(s+0x54);}o+=(ss+3)&~3u;}WHBFreeWholeFile(r);return n;}
+static Tex*pick(const char*n,Tex&a,Tex&b,Tex&c){if(has(n,"PenIcon_00"))return&a;if(has(n,"EraserIcon_00"))return&b;if(has(n,"WriteIcon_00"))return&c;return 0;}
+static void quad(V*v,const Pane&p,float lw,float lh){float x0=p.x/lw*2-1,x1=(p.x+p.w)/lw*2-1,y0=1-p.y/lh*2,y1=1-(p.y+p.h)/lh*2;v[0]={x0,y1,0,1};v[1]={x1,y1,1,1};v[2]={x1,y0,1,0};v[3]={x0,y0,0,0};}
+static void touch(uint32_t&sel,Pane*p,uint32_t n,float x,float y){for(uint32_t i=0;i<n;i++)if(p[i].visible&&x>=p[i].x&&x<=p[i].x+p[i].w&&y>=p[i].y&&y<=p[i].y+p[i].h){if(has(p[i].name,"PenIcon_00"))sel=0;else if(has(p[i].name,"EraserIcon_00"))sel=1;else if(has(p[i].name,"WriteIcon_00"))sel=2;}}
+int main(){WHBProcInit();if(!WHBGfxInit()){WHBProcShutdown();return -1;}WHBLogConsoleInit();Pane panes[128];float lw,lh;uint32_t pc=parse(panes,128,lw,lh);WHBLogPrintf("Stage 2: MemoTop original renderer, %u panes",pc);uint32_t ss=0;void*sd=WHBReadWholeFile(SHADER,&ss);WHBGfxShaderGroup sh;memset(&sh,0,sizeof(sh));bool shader=sd&&WHBGfxLoadGFDShaderGroup(&sh,0,sd);if(shader){WHBGfxInitShaderAttribute(&sh,"position",0,0,GX2_ATTRIB_FORMAT_FLOAT_32_32);WHBGfxInitShaderAttribute(&sh,"tex_coord_in",1,0,GX2_ATTRIB_FORMAT_FLOAT_32_32);WHBGfxInitFetchShader(&sh);}GX2RBuffer vb;memset(&vb,0,sizeof(vb));vb.flags=GX2R_RESOURCE_BIND_VERTEX_BUFFER|GX2R_RESOURCE_USAGE_CPU_READ|GX2R_RESOURCE_USAGE_CPU_WRITE|GX2R_RESOURCE_USAGE_GPU_READ;vb.elemSize=sizeof(V);vb.elemCount=4;GX2RCreateBuffer(&vb);Tex pen,eraser,write;loadTex(pen,"/vol/content/memo/layout/Body/Common-extracted/timg/PenIcon_00^t.bflim");loadTex(eraser,"/vol/content/memo/layout/Body/Common-extracted/timg/P_EraserIcon_00^t.bflim");loadTex(write,"/vol/content/memo/layout/Body/Common-extracted/timg/P_WriteIcon_00^t.bflim");GX2Sampler samp;GX2InitSampler(&samp,GX2_TEX_CLAMP_MODE_CLAMP,GX2_TEX_XY_FILTER_MODE_LINEAR);uint32_t sel=0;while(WHBProcIsRunning()){VPADStatus st;VPADReadError er;memset(&st,0,sizeof(st));if(VPADRead(VPAD_CHAN_0,&st,1,&er)>0){if(st.trigger&VPAD_BUTTON_A)sel=(sel+1)%3;if(st.trigger&VPAD_BUTTON_B)sel=0;if(st.touch.touched&&st.touch.validity==VPAD_TOUCH_VALID)touch(sel,panes,pc,float(st.touch.x),float(st.touch.y));}WHBGfxBeginRender();WHBGfxBeginRenderDRC();WHBGfxClearColor(.92f,.92f,.92f,1);if(shader){GX2SetFetchShader(&sh.fetchShader);GX2SetVertexShader(sh.vertexShader);GX2SetPixelShader(sh.pixelShader);uint32_t unit=sh.pixelShader->samplerVars[0].location;GX2SetPixelSampler(&samp,unit);for(uint32_t i=0;i<pc;i++){Pane&p=panes[i];Tex*t=pick(p.name,pen,eraser,write);if(!p.visible||!t||!t->ok)continue;V q[4];quad(q,p,lw,lh);void*b=GX2RLockBufferEx(&vb,GX2R_RESOURCE_USAGE_CPU_WRITE);memcpy(b,q,sizeof(q));GX2RUnlockBufferEx(&vb,GX2R_RESOURCE_USAGE_CPU_WRITE);GX2RSetAttributeBuffer(&vb,0,sizeof(V),0);GX2RSetAttributeBuffer(&vb,1,sizeof(V),8);GX2SetPixelTexture(&t->t,unit);GX2DrawEx(GX2_PRIMITIVE_MODE_QUADS,4,0,1);}}WHBGfxFinishRenderDRC();WHBGfxFinishRender();WHBLogConsoleDraw();OSSleepTicks(OSMillisecondsToTicks(16));}freeTex(pen);freeTex(eraser);freeTex(write);GX2RDestroyBufferEx(&vb,0);if(sd)WHBFreeWholeFile(sd);WHBLogConsoleFree();WHBGfxShutdown();WHBProcShutdown();return 0;}
